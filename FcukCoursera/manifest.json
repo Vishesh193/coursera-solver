@@ -1,0 +1,36 @@
+{
+  "manifest_version": 3,
+  "name": "FcukCoursera",
+  "version": "1.0",
+  "author": "Vishesh Arora",
+  "description": "Automates marking all videos as complete in a Coursera course.",
+  "permissions": [
+    "activeTab",
+    "scripting",
+    "cookies",
+    "storage",
+    "tabs"
+  ],
+  "host_permissions": [
+    "https://www.coursera.org/*",
+    "https://api.mistral.ai/*"
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "action": {
+    "default_popup": "popup.html",
+    "default_icon": "icon.jpg"
+  },
+  "icons": {
+    "16": "icon.jpg",
+    "48": "icon.jpg",
+    "128": "icon.jpg"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.coursera.org/*"],
+      "js": ["content.js"]
+    }
+  ]
+}
