@@ -28,5 +28,8 @@ My university assigned Coursera courses with tight deadlines, and I kept remembe
 ## Author & Owner
 **Vishesh Arora**
 
+## Support & Feedback
+If you face any problems or have any suggestions, feel free to email: [vishesharora194@gmail.com](mailto:vishesharora194@gmail.com)
+
 ## Disclaimer
 This tool is for educational purposes only. Using it to bypass academic requirements may violate your institution's honor code or Coursera's terms of service. Use responsibly.
