@@ -65,12 +65,15 @@ document.getElementById('readBtn').addEventListener('click', async () => {
 });
 
 
-// Load saved key
-chrome.storage.local.get(['mistralApiKey', 'geminiApiKey'], (result) => {
+// Load saved keys
+chrome.storage.local.get(['mistralApiKey', 'openaiApiKey', 'geminiApiKey'], (result) => {
     if (result.mistralApiKey) {
         document.getElementById('apiKey').value = result.mistralApiKey;
     } else if (result.geminiApiKey) {
         document.getElementById('apiKey').value = result.geminiApiKey;
+    }
+    if (result.openaiApiKey) {
+        document.getElementById('openaiApiKey').value = result.openaiApiKey;
     }
 });
 
@@ -122,11 +125,12 @@ chrome.storage.local.get(['mistralApiKey', 'geminiApiKey'], (result) => {
 
 document.getElementById('quizBtn').addEventListener('click', async () => {
     const apiKey = document.getElementById('apiKey').value;
-    if (!apiKey) {
-        document.getElementById('status').innerText = "Enter API Key first!";
+    const openaiApiKey = document.getElementById('openaiApiKey').value;
+    if (!apiKey && !openaiApiKey) {
+        document.getElementById('status').innerText = "Enter at least one API Key first!";
         return;
     }
-    chrome.storage.local.set({ mistralApiKey: apiKey });
+    chrome.storage.local.set({ mistralApiKey: apiKey, openaiApiKey: openaiApiKey });
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
@@ -138,20 +142,21 @@ document.getElementById('quizBtn').addEventListener('click', async () => {
     document.getElementById('quizBtn').disabled = true;
     document.getElementById('status').innerText = "Starting Quizzes, Labs & Assignments Solver...";
 
-    sendMessageWithFallback(tab.id, { action: "start_quiz_solver", apiKey: apiKey }, () => {
+    sendMessageWithFallback(tab.id, { action: "start_quiz_solver", apiKeys: { mistral: apiKey, openai: openaiApiKey } }, () => {
         document.getElementById('status').innerText = "Error: Reload extension & refresh page.";
     });
 });
 
 document.getElementById('completeBtn').addEventListener('click', async () => {
     const apiKey = document.getElementById('apiKey').value;
-    if (!apiKey) {
-        alert("Please enter a Mistral API Key first.");
+    const openaiApiKey = document.getElementById('openaiApiKey').value;
+    if (!apiKey && !openaiApiKey) {
+        alert("Please enter an API Key first.");
         return;
     }
     
-    // Save key
-    chrome.storage.local.set({ mistralApiKey: apiKey });
+    // Save keys
+    chrome.storage.local.set({ mistralApiKey: apiKey, openaiApiKey: openaiApiKey });
 
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
     
@@ -167,7 +172,7 @@ document.getElementById('completeBtn').addEventListener('click', async () => {
     document.getElementById('progressContainer').style.display = 'block';
     document.getElementById('progressText').style.display = 'block';
 
-    sendMessageWithFallback(tab.id, { action: "start_complete_course", apiKey: apiKey }, () => {
+    sendMessageWithFallback(tab.id, { action: "start_complete_course", apiKeys: { mistral: apiKey, openai: openaiApiKey } }, () => {
         document.getElementById('status').innerText = "Error: Reload extension & refresh page.";
     });
 });

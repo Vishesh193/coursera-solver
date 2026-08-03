@@ -68,7 +68,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         globalState.isRunning = true;
         globalState.currentAction = "quiz";
-        startQuizSolverProcess(request.apiKey).finally(() => { globalState.isRunning = false; });
+        startQuizSolverProcess(request.apiKeys).finally(() => { globalState.isRunning = false; });
         sendResponse({ status: "started" });
     }
     if (request.action === "start_complete_course") {
@@ -78,7 +78,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         }
         globalState.isRunning = true;
         globalState.currentAction = "complete";
-        startCompleteCourseProcess(request.apiKey).finally(() => { globalState.isRunning = false; });
+        startCompleteCourseProcess(request.apiKeys).finally(() => { globalState.isRunning = false; });
         sendResponse({ status: "started" });
     }
     if (request.action === "start_discussions") {
@@ -123,7 +123,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
     }
 });
 
-async function startCompleteCourseProcess(apiKey) {
+async function startCompleteCourseProcess(apiKeys) {
     try {
         const { userId, courseId, courseSlug, allItems } = await getCourseData();
         
@@ -151,7 +151,7 @@ async function startCompleteCourseProcess(apiKey) {
                 }
                 else {
                     log(`[Processing Assessment/Assignment/Lab] ${item.name} (${item.typeName})`);
-                    await processQuizItem(userId, courseId, item, apiKey);
+                    await processQuizItem(userId, courseId, item, apiKeys);
                     result = true;
                 }
 
@@ -600,7 +600,7 @@ async function completeSingleReading(userId, courseId, courseSlug, itemId) {
     }
 }
 
-async function startQuizSolverProcess(apiKey) {
+async function startQuizSolverProcess(apiKeys) {
     try {
         const { userId, courseId, courseSlug, allItems } = await getCourseData();
         
@@ -621,7 +621,7 @@ async function startQuizSolverProcess(apiKey) {
             log(`[Processing Item] ${item.name} (${item.typeName}) - ID: ${item.id}`);
 
             try {
-                await processQuizItem(userId, courseId, item, apiKey);
+                await processQuizItem(userId, courseId, item, apiKeys);
             } catch (err) {
                 log(`Failed to process item ${item.name}: ${err.message}`);
             }
@@ -637,7 +637,7 @@ async function startQuizSolverProcess(apiKey) {
     }
 }
 
-async function processQuizItem(userId, courseId, item, apiKey) {
+async function processQuizItem(userId, courseId, item, apiKeys) {
     log(`Processing ${item.name} (${item.typeName})...`);
     
     if (item.contentSummary) {
@@ -647,7 +647,7 @@ async function processQuizItem(userId, courseId, item, apiKey) {
     // Discussion Prompts
     if (['discussionPrompt', 'discussion', 'discussionForum', 'discussionPromptQuestion'].includes(item.typeName)) {
         try {
-            await processDiscussionPrompt(userId, courseId, item, apiKey);
+            await processDiscussionPrompt(userId, courseId, item, apiKeys);
             return;
         } catch (e) {
             log(`Discussion prompt processing error for ${item.name}: ${e.message}`);
@@ -659,7 +659,7 @@ async function processQuizItem(userId, courseId, item, apiKey) {
     const examTypes = ['exam', 'gradedQuiz'];
     if (examTypes.includes(item.typeName)) {
         try {
-            await processExamItem(userId, courseId, item, apiKey);
+            await processExamItem(userId, courseId, item, apiKeys);
             processed = true;
         } catch (e) {
             log(`Exam session method failed for ${item.name}: ${e.message}`);
@@ -669,7 +669,7 @@ async function processQuizItem(userId, courseId, item, apiKey) {
     // Step B: Try GraphQL Submission API (works for quizzes, practice assessments, graded assignments, peer reviews, widgets)
     if (!processed) {
         try {
-            await processUngradedAssignment(userId, courseId, item, apiKey);
+            await processUngradedAssignment(userId, courseId, item, apiKeys);
             processed = true;
         } catch (e) {
             log(`GraphQL method failed for ${item.name}: ${e.message}`);
@@ -816,7 +816,7 @@ async function fillAndSubmitDiscussionPromptDOM() {
     return true;
 }
 
-async function processDiscussionPrompt(userId, courseId, item, apiKey) {
+async function processDiscussionPrompt(userId, courseId, item, apiKeys) {
     // This is kept for compatibility with processQuizItem
     await markDiscussionComplete(userId, courseId, item);
 }
@@ -959,7 +959,7 @@ async function completeLabOrGenericItem(userId, courseId, item) {
     return false;
 }
 
-async function processUngradedAssignment(userId, courseId, item, apiKey) {
+async function processUngradedAssignment(userId, courseId, item, apiKeys) {
     log(`Attempting to process Ungraded Assignment: ${item.name}`);
 
     // Strategy: Use GraphQL Submission_StartAttempt
@@ -1029,14 +1029,14 @@ async function processUngradedAssignment(userId, courseId, item, apiKey) {
         
         // Always attempt processGraphQLSession to solve and submit questions using Mistral AI
         log("Attempting GraphQL Session processing...");
-        await processGraphQLSession(courseId, item.id, headers, apiKey);
+        await processGraphQLSession(courseId, item.id, headers, apiKeys);
 
     } catch (e) {
         log(`Error in GraphQL Start: ${e.message}`);
     }
 }
 
-async function processGraphQLSession(courseId, itemId, headers, apiKey) {
+async function processGraphQLSession(courseId, itemId, headers, apiKeys) {
     log("Attempting to fetch questions via GraphQL...");
     
     const graphqlUrl = 'https://www.coursera.org/graphql-gateway?opname=QueryState';
@@ -1988,7 +1988,7 @@ fragment TextBlock on Submission_TextBlock {
                 };
             }).filter(q => q !== null); // Filter out nulls (TextBlocks)
 
-            await solveQuestions('graphql', courseId, itemId, questions, headers, apiKey);
+            await solveQuestions('graphql', courseId, itemId, questions, headers, apiKeys);
 
         } else {
             log("No in-progress attempt found. You might need to start it manually once.");
@@ -1999,7 +1999,7 @@ fragment TextBlock on Submission_TextBlock {
     }
 }
 
-async function processSession(endpoint, sessionId, headers, apiKey) {
+async function processSession(endpoint, sessionId, headers, apiKeys) {
     // Generic function to handle session state and solving
     try {
         const actionUrl = `https://www.coursera.org/api/${endpoint}/${sessionId}/actions?includes=gradingAttempts`;
@@ -2035,7 +2035,7 @@ async function processSession(endpoint, sessionId, headers, apiKey) {
 
         if (questions && questions.length > 0) {
             log(`Found ${questions.length} questions!`);
-            await solveQuestions(endpoint, sessionId, questions, headers, apiKey);
+            await solveQuestions(endpoint, sessionId, questions, headers, apiKeys);
         } else {
             log("No questions found in session state.");
             log("State Data: " + JSON.stringify(actionData).substring(0, 200));
@@ -2045,7 +2045,7 @@ async function processSession(endpoint, sessionId, headers, apiKey) {
     }
 }
 
-async function solveQuestions(endpoint, courseId, itemId, questions, headers, apiKey) {
+async function solveQuestions(endpoint, courseId, itemId, questions, headers, apiKeys) {
     log("Starting solver...");
     
     // We need to collect all responses to save them
@@ -2083,9 +2083,18 @@ async function solveQuestions(endpoint, courseId, itemId, questions, headers, ap
                 `;
             }
             
-            log(`Asking Mistral for Question ${q.id}...`);
-            const answerText = await callMistral(apiKey, prompt);
-            log(`Mistral says: ${answerText}`);
+            let answerText = "";
+            if (apiKeys.openai) {
+                log(`Asking OpenAI (gpt-5.6-terra) for Question ${q.id}...`);
+                answerText = await callOpenAI(apiKeys.openai, prompt);
+                log(`OpenAI says: ${answerText}`);
+            } else if (apiKeys.mistral) {
+                log(`Asking Mistral for Question ${q.id}...`);
+                answerText = await callMistral(apiKeys.mistral, prompt);
+                log(`Mistral says: ${answerText}`);
+            } else {
+                throw new Error("No API key provided");
+            }
             
             if (isTextQuestion) {
                 // Handle Text Response
@@ -2315,7 +2324,7 @@ async function submitDraftGraphQL(headers, courseId, itemId, submissionId) {
     }
 }
 
-async function processExamItem(userId, courseId, item, apiKey) {
+async function processExamItem(userId, courseId, item, apiKeys) {
     try {
         log(`Attempting to start exam session for ${item.name}...`);
         
@@ -2360,10 +2369,41 @@ async function processExamItem(userId, courseId, item, apiKey) {
         log(`Session Started! Session ID: ${sessionId}`);
 
         // Delegate to generic session processor
-        await processSession('onDemandExamSessions.v1', sessionId, headers, apiKey);
+        await processSession('onDemandExamSessions.v1', sessionId, headers, apiKeys);
 
     } catch (e) {
         log(`Error processing exam: ${e.message}`);
+    }
+}
+
+async function callOpenAI(apiKey, prompt) {
+    try {
+        const url = 'https://api.openai.com/v1/chat/completions';
+        const response = await fetch(url, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`
+            },
+            body: JSON.stringify({
+                model: 'gpt-5.6-terra',
+                messages: [
+                    {
+                        role: 'user',
+                        content: prompt
+                    }
+                ]
+            })
+        });
+        
+        if (!response.ok) {
+            throw new Error(`OpenAI API Error: ${response.status}`);
+        }
+        
+        const data = await response.json();
+        return data.choices?.[0]?.message?.content || "No response";
+    } catch (e) {
+        return "Error calling OpenAI: " + e.message;
     }
 }
 
