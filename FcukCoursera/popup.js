@@ -89,6 +89,7 @@ chrome.storage.local.get(['mistralApiKey', 'openaiApiKey', 'geminiApiKey'], (res
                 document.getElementById('startBtn').disabled = true;
                 document.getElementById('readBtn').disabled = true;
                 document.getElementById('quizBtn').disabled = true;
+                if (document.getElementById('labBtn')) document.getElementById('labBtn').disabled = true;
                 document.getElementById('completeBtn').disabled = true;
                 
                 document.getElementById('status').innerText = response.statusMessage;
@@ -140,9 +141,29 @@ document.getElementById('quizBtn').addEventListener('click', async () => {
     }
 
     document.getElementById('quizBtn').disabled = true;
-    document.getElementById('status').innerText = "Starting Quizzes, Labs & Assignments Solver...";
+    document.getElementById('status').innerText = "Starting Quizzes & Assignments Solver...";
 
     sendMessageWithFallback(tab.id, { action: "start_quiz_solver", apiKeys: { mistral: apiKey, openai: openaiApiKey } }, () => {
+        document.getElementById('status').innerText = "Error: Reload extension & refresh page.";
+    });
+});
+
+document.getElementById('labBtn').addEventListener('click', async () => {
+    const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    
+    if (!tab.url.includes("coursera.org")) {
+        document.getElementById('status').innerText = "Error: Not on Coursera!";
+        return;
+    }
+
+    document.getElementById('labBtn').disabled = true;
+    document.getElementById('status').innerText = "Starting Lab Solver...";
+    
+    // Show progress bar
+    document.getElementById('progressContainer').style.display = 'block';
+    document.getElementById('progressText').style.display = 'block';
+
+    sendMessageWithFallback(tab.id, { action: "start_lab_solver" }, () => {
         document.getElementById('status').innerText = "Error: Reload extension & refresh page.";
     });
 });
@@ -200,6 +221,7 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         document.getElementById('startBtn').disabled = false;
         document.getElementById('readBtn').disabled = false;
         document.getElementById('quizBtn').disabled = false;
+        if (document.getElementById('labBtn')) document.getElementById('labBtn').disabled = false;
         document.getElementById('completeBtn').disabled = false;
         document.getElementById('status').innerText = "Process Finished!";
     }

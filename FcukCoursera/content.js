@@ -91,6 +91,16 @@ chrome.runtime.onMessage.addListener((request, sender, sendResponse) => {
         startDiscussionProcess().finally(() => { globalState.isRunning = false; });
         sendResponse({ status: "started" });
     }
+    if (request.action === "start_lab_solver") {
+        if (globalState.isRunning) {
+            sendResponse({ status: "already_running" });
+            return;
+        }
+        globalState.isRunning = true;
+        globalState.currentAction = "lab";
+        startLabSolverProcess().finally(() => { globalState.isRunning = false; });
+        sendResponse({ status: "started" });
+    }
 
     // Popup asks for the list of discussion items (popup will drive navigation)
     if (request.action === "get_discussion_items") {
@@ -608,10 +618,20 @@ async function startQuizSolverProcess(apiKeys) {
         const uniqueTypes = [...new Set(allItems.map(item => item.typeName))];
         log(`Found item types: ${uniqueTypes.map(t => t || 'undefined').join(', ')}`);
 
-        // Filter out pure videos & readings, process all quizzes, practice assessments, graded assignments, labs, etc.
-        const nonMediaItems = allItems.filter(item => !['lecture', 'supplement', 'article', 'resource'].includes(item.typeName));
+        // Filter out media and labs, only process quizzes and assignments
+        const excludedTypes = [
+            'lecture', 'supplement', 'article', 'resource', 
+            'pharos', 'workspace', 'lti', 'app', 'programming', 'lab',
+            'ungradedprogramming', 'gradedprogramming', 'notebook', 
+            'ungradedlti', 'gradedlti', 'ungradedwidget', 'gradedwidget'
+        ];
+        const nonMediaItems = allItems.filter(item => {
+            const t = (item.typeName || '').toLowerCase();
+            const isLab = excludedTypes.includes(t) || t.includes('programming') || t.includes('workspace') || t.includes('lti') || t.includes('notebook') || t.includes('widget') || t.includes('app');
+            return !isLab && !['lecture', 'supplement', 'article', 'resource'].includes(t);
+        });
         
-        log(`Found ${nonMediaItems.length} quizzes, graded assignments, practice assessments & labs.`);
+        log(`Found ${nonMediaItems.length} quizzes, graded assignments, practice assessments.`);
         
         for (let i = 0; i < nonMediaItems.length; i++) {
             const item = nonMediaItems[i];
@@ -636,6 +656,186 @@ async function startQuizSolverProcess(apiKeys) {
         updateStatus("Error occurred. Check logs.");
     }
 }
+
+function findClickableElement(keywords) {
+    // Strictly select interactive / clickable elements first
+    const selectors = [
+        'button',
+        'a[href]',
+        'a[role="button"]',
+        'input[type="button"]',
+        'input[type="submit"]',
+        '[role="button"]',
+        '[tabindex="0"]',
+        '.cds-button'
+    ];
+    
+    const candidates = Array.from(document.querySelectorAll(selectors.join(', ')));
+    
+    let match = candidates.find(el => {
+        const rect = el.getBoundingClientRect();
+        if (rect.width === 0 && rect.height === 0) return false;
+        
+        const text = (el.innerText || el.textContent || el.value || el.getAttribute('aria-label') || '').toLowerCase().trim();
+        return keywords.some(kw => text.includes(kw));
+    });
+
+    // Fallback: search leaf nodes (elements with no children)
+    if (!match) {
+        const allLeafs = Array.from(document.querySelectorAll('span, div, p')).filter(el => el.children.length === 0);
+        match = allLeafs.find(el => {
+            const rect = el.getBoundingClientRect();
+            if (rect.width === 0 && rect.height === 0) return false;
+            
+            const text = (el.innerText || el.textContent || '').toLowerCase().trim();
+            return keywords.some(kw => text.includes(kw));
+        });
+    }
+
+    return match;
+}
+
+async function autoSolveCurrentLabPage() {
+    log("Scanning page for 'Launch Lab' button...");
+
+    // Poll for Launch Lab button for up to 10 seconds
+    let launchBtn = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+        launchBtn = findClickableElement(['launch lab', 'open tool', 'start lab', 'open workspace', 'launch app', 'open app', 'go to lab', 'launch']);
+        if (launchBtn) break;
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    if (launchBtn) {
+        const btnText = (launchBtn.innerText || launchBtn.textContent || launchBtn.value || '').trim();
+        log(`Found Launch Lab button (${launchBtn.tagName}): "${btnText}" — clicking!`);
+        
+        launchBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 500));
+        
+        launchBtn.focus();
+        launchBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+        launchBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        launchBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        launchBtn.click();
+
+        log("Clicked Launch Lab. Waiting 5 seconds for completion button...");
+        await new Promise(r => setTimeout(r, 5000));
+    } else {
+        log("No 'Launch Lab' button detected within timeout (or lab already launched).");
+    }
+
+    // Poll for Mark as Complete button for up to 10 seconds
+    log("Scanning page for 'Mark as Complete' button...");
+    let completeBtn = null;
+    for (let attempt = 0; attempt < 20; attempt++) {
+        completeBtn = findClickableElement(['mark as complete', 'mark complete', 'mark completed', 'complete & continue']);
+        if (completeBtn) break;
+        await new Promise(r => setTimeout(r, 500));
+    }
+
+    if (completeBtn) {
+        const btnText = (completeBtn.innerText || completeBtn.textContent || completeBtn.value || '').trim();
+        log(`Found Mark as Complete button (${completeBtn.tagName}): "${btnText}" — clicking!`);
+        
+        completeBtn.scrollIntoView({ behavior: 'smooth', block: 'center' });
+        await new Promise(r => setTimeout(r, 500));
+        
+        completeBtn.focus();
+        completeBtn.dispatchEvent(new MouseEvent('mouseover', { bubbles: true, cancelable: true }));
+        completeBtn.dispatchEvent(new MouseEvent('mousedown', { bubbles: true, cancelable: true }));
+        completeBtn.dispatchEvent(new MouseEvent('mouseup', { bubbles: true, cancelable: true }));
+        completeBtn.click();
+        
+        log("Clicked Mark as Complete button!");
+        await new Promise(r => setTimeout(r, 2500));
+    } else {
+        log("No 'Mark as Complete' button detected on page.");
+    }
+}
+
+async function startLabSolverProcess() {
+    try {
+        const { userId, courseId, courseSlug, allItems } = await getCourseData();
+        
+        // Strict lab filter: ONLY match item types for labs (ungradedLab, gradedLab, pharos, workspace, lti)
+        const labItems = allItems.filter(item => {
+            const t = (item.typeName || '').toLowerCase();
+            return t === 'ungradedlab' || t === 'gradedlab' || t === 'pharos' || t === 'workspace' || t === 'lti' || t === 'lab';
+        });
+        
+        log(`Found ${labItems.length} strict labs.`);
+        
+        if (labItems.length === 0) {
+            updateStatus("No labs found.");
+            chrome.runtime.sendMessage({ action: "finished" }).catch(() => {});
+            return;
+        }
+
+        // Store queue in local storage and navigate to first lab to start Auto-Pilot
+        chrome.storage.local.set({
+            fcukLabQueue: labItems,
+            fcukLabIndex: 0,
+            fcukCourseSlug: courseSlug,
+            fcukUserId: userId,
+            fcukCourseId: courseId
+        }, () => {
+            log(`Starting Lab Auto-Pilot for ${labItems.length} labs... Navigating to Lab 1...`);
+            window.location.href = `https://www.coursera.org/learn/${courseSlug}/item/${labItems[0].id}`;
+        });
+
+    } catch (e) {
+        log("Error: " + e.message);
+        updateStatus("Error occurred. Check logs.");
+    }
+}
+
+// Auto-Pilot Lab Queue Processor on Page Load
+(function checkLabAutoPilot() {
+    chrome.storage.local.get(['fcukLabQueue', 'fcukLabIndex', 'fcukCourseSlug', 'fcukUserId', 'fcukCourseId'], async (res) => {
+        if (res.fcukLabQueue && res.fcukLabQueue.length > 0 && typeof res.fcukLabIndex === 'number' && res.fcukLabIndex < res.fcukLabQueue.length) {
+            const index = res.fcukLabIndex;
+            const total = res.fcukLabQueue.length;
+            const item = res.fcukLabQueue[index];
+
+            log(`[Lab Auto-Pilot ${index + 1}/${total}] ${item.name}`);
+            updateProgress(index, total, item.name);
+            updateStatus(`[Lab Auto-Pilot ${index + 1}/${total}] ${item.name}`);
+
+            // Wait for React UI render
+            await new Promise(r => setTimeout(r, 3500));
+
+            // Perform DOM click automation (Launch Lab + Mark as Complete)
+            await autoSolveCurrentLabPage();
+
+            // Run API completion as backup
+            if (res.fcukUserId && res.fcukCourseId) {
+                await completeLabOrGenericItem(res.fcukUserId, res.fcukCourseId, item);
+            }
+
+            // Move to next item
+            const nextIndex = index + 1;
+            if (nextIndex < total) {
+                chrome.storage.local.set({ fcukLabIndex: nextIndex }, () => {
+                    const nextItem = res.fcukLabQueue[nextIndex];
+                    log(`Navigating to Lab ${nextIndex + 1}/${total}: ${nextItem.name}`);
+                    window.location.href = `https://www.coursera.org/learn/${res.fcukCourseSlug}/item/${nextItem.id}`;
+                });
+            } else {
+                log("All labs in queue completed successfully!");
+                updateProgress(total, total, "Done!");
+                updateStatus("Lab Auto-Pilot Finished!");
+                const courseSlug = res.fcukCourseSlug;
+                chrome.storage.local.remove(['fcukLabQueue', 'fcukLabIndex', 'fcukCourseSlug', 'fcukUserId', 'fcukCourseId'], () => {
+                    chrome.runtime.sendMessage({ action: "finished" }).catch(() => {});
+                    if (courseSlug) {
+                        window.location.href = `https://www.coursera.org/learn/${courseSlug}/home/welcome`;
+                    }
+                });
+            }
+        }
+    });
+})();
 
 async function processQuizItem(userId, courseId, item, apiKeys) {
     log(`Processing ${item.name} (${item.typeName})...`);
@@ -920,12 +1120,20 @@ async function completeLabOrGenericItem(userId, courseId, item) {
     };
 
     const completionId = `${userId}~${courseId}~${item.id}`;
+    
+    // Dedicated lab endpoints (excluding discussion/supplement endpoints which false-positive)
     const endpoints = [
-        'onDemandDiscussionPromptCompletions.v1',
-        'onDemandSupplementCompletions.v1',
+        'onDemandAppCompletions.v1',
+        'onDemandWorkspaceCompletions.v1',
         'onDemandItemCompletions.v1',
-        'onDemandAppCompletions.v1'
+        'onDemandLabCompletions.v1',
+        'onDemandUngradedLabCompletions.v1',
+        'onDemandProgrammingScriptCompletions.v1',
+        'onDemandProgrammingSubmissionCompletions.v1',
+        'onDemandLtiLineItemCompletions.v1'
     ];
+
+    let completed = false;
 
     for (const endpoint of endpoints) {
         try {
@@ -938,9 +1146,10 @@ async function completeLabOrGenericItem(userId, courseId, item) {
                 userId: Number(userId)
             });
             const postRes = await fetch(collectionUrl, { method: 'POST', headers, body: postBody, credentials: 'include' });
+            log(`  [${endpoint} POST] → Status: ${postRes.status}`);
             if (postRes.ok) {
-                log(`[Lab/Item Completed via ${endpoint}] ${item.name}`);
-                return true;
+                log(`  ✓ Successfully completed ${item.name} via POST ${endpoint}`);
+                completed = true;
             }
 
             const putBody = JSON.stringify({
@@ -950,13 +1159,16 @@ async function completeLabOrGenericItem(userId, courseId, item) {
                 userId: Number(userId)
             });
             const putRes = await fetch(resourceUrl, { method: 'PUT', headers, body: putBody, credentials: 'include' });
+            log(`  [${endpoint} PUT] → Status: ${putRes.status}`);
             if (putRes.ok) {
-                log(`[Lab/Item Completed via ${endpoint}] ${item.name}`);
-                return true;
+                log(`  ✓ Successfully completed ${item.name} via PUT ${endpoint}`);
+                completed = true;
             }
-        } catch (e) {}
+        } catch (e) {
+            log(`  [${endpoint} Error] ${e.message}`);
+        }
     }
-    return false;
+    return completed;
 }
 
 async function processUngradedAssignment(userId, courseId, item, apiKeys) {
